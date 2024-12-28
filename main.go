@@ -2,67 +2,81 @@ package main
 
 import (
 	"compress/gzip"
-	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 )
 
 const mandir string = "/usr/share/man/man1/"
 
-func check(e error) {
+func checkForErrors(e error) {
 	if e != nil {
-		panic(e)
+		log.Printf("Error occured %e", e)
+		os.Exit(1)
 	}
 }
 
-func main() {
-	data, err := os.ReadDir(mandir)
+func createDir(dirname string) {
+	_, err := os.Stat(dirname)
 
-	check(err)
+	if err != nil {
+		err := os.Mkdir(dirname, os.ModePerm)
 
-	var first os.DirEntry = data[3]
-	const dest = "unzipped"
+		if err != nil {
+			log.Fatal("Could not create directory")
+		}
 
-	firstFilePath := filepath.Join(mandir, first.Name())
+		log.Printf("Succesfully created a directory %s", dirname)
+	} else {
+		log.Printf("Path %s already exists", dirname)
+	}
+}
 
-	fmt.Println(firstFilePath, first.Name())
-
-	f, err := os.Open(firstFilePath)
-	check(err)
+func readAndCopyGzip(sourcePath string, destinationPath string) {
+	// open the file and uncompress it through gzip reader
+	f, err := os.Open(sourcePath)
+	checkForErrors(err)
 
 	defer f.Close()
 
 	gr, err := gzip.NewReader(f)
-	check(err)
+	checkForErrors(err)
 
 	defer gr.Close()
 
-    const filesPath string = "./files/";
+	// create destination file and copy the contents of uncompressed file to it
+	dest, err := os.Create(destinationPath)
+	checkForErrors(err)
 
-    // create files dir if not exists
-    stat, err := os.Stat(filesPath);
+	defer dest.Close()
 
-    if(err != nil || !stat.IsDir()) {
-        err := os.MkdirAll(filesPath, os.ModePerm);
-        check(err);
+	nbytes, err := io.Copy(dest, gr)
+	checkForErrors(err)
 
-        fmt.Println("Created directory", filesPath);
-    }
+	log.Printf("Written %d bytes to %s", nbytes, destinationPath)
 
-    destFilePath := filepath.Join(filesPath, first.Name() + ".txt");
-	destination, err := os.Create(destFilePath)
-    check(err);
-
-	defer destination.Close()
-
-	nbytes, err := io.Copy(destination, gr)
-	check(err)
-	
-	fmt.Println("Written", nbytes, "to", destFilePath)
-
-	destination.Close()
+	dest.Close()
 	gr.Close()
 	f.Close()
+}
 
+func main() {
+	data, err := os.ReadDir(mandir)
+	checkForErrors(err)
+
+	// create destination directory to output unzipped files
+	createDir("files")
+
+	// remove the .gz extension from the file when extracting
+	r, _ := regexp.Compile(".gz$")
+
+	for i := 0; i < len(data); i++ {
+		filePath := filepath.Join(mandir, data[i].Name())
+		destFileName := r.ReplaceAllString((data[i].Name()), "")
+		destFilePath := filepath.Join("./files", destFileName)
+
+        readAndCopyGzip(filePath, destFilePath);
+	}
 }
